@@ -24,7 +24,7 @@ void sighandler(int){runloop = false;}
 using namespace std;
 using namespace Eigen;
 
-const string robot_file = "./resources/panda_arm_ati_probe.urdf";
+const string robot_file = "./resources/panda_arm.urdf";
 
 // redis keys:
 // robot local control loop
@@ -98,13 +98,6 @@ const bool flag_simulation = false;
 int main() {
 
 	if(!flag_simulation) {
-		// ROBOT_COMMAND_TORQUES_KEY = "sai2::FrankaPanda::actuators::fgc";
-		// JOINT_ANGLES_KEY  = "sai2::FrankaPanda::sensors::q";
-		// JOINT_VELOCITIES_KEY = "sai2::FrankaPanda::sensors::dq";
-		// MASSMATRIX_KEY = "sai2::FrankaPanda::sensors::model::massmatrix";
-		// CORIOLIS_KEY = "sai2::FrankaPanda::sensors::model::coriolis";
-		// ROBOT_SENSED_FORCE_KEY = "sai2::ATIGamma_Sensor::force_torque";
-
 		ROBOT_COMMAND_TORQUES_KEY = "sai2::FrankaPanda::Bonnie::actuators::fgc";
 		JOINT_ANGLES_KEY  = "sai2::FrankaPanda::Bonnie::sensors::q";
 		JOINT_VELOCITIES_KEY = "sai2::FrankaPanda::Bonnie::sensors::dq";
@@ -154,7 +147,7 @@ int main() {
 	// posori task
 	const string link_name = "end_effector";
 	// const Vector3d pos_in_link = Vector3d(0, 0, 0.115);
-	const Vector3d pos_in_link = Vector3d(0, 0, 0.23);
+	const Vector3d pos_in_link = Vector3d(0, 0, 0.10);
 	auto posori_task = new Sai2Primitives::PosOriTask(robot, link_name, pos_in_link);
 	Vector3d x_init = posori_task->_current_position;
 	Matrix3d R_init = posori_task->_current_orientation;
@@ -223,15 +216,13 @@ int main() {
 	Vector3d init_force = Vector3d::Zero();
 	bool first_loop = true;
 
-	if(!flag_simulation) {
-		// force_bias << -1.07533, 2.595, 1.06743, 0.00255779, 0.4091, 0.00690383;
-		// tool_mass = 0.70546;
-		// tool_com = Vector3d(-0.000492687, -0.00311402, 0.104075);
+	// if(!flag_simulation) {
+	// 	// Adrian's previous tool mass and force bias calculations as of 11-22-23
 
-		force_bias << -0.748279, 2.13543, -1.63351, 0.0422871, 0.405593, 0.0400872;
-		tool_mass = 0.613955;
-		tool_com = Vector3d(-0.00104997, -0.000560744, 0.0937631);
-	}
+	// 	force_bias << -0.748279, 2.13543, -1.63351, 0.0422871, 0.405593, 0.0400872;
+	// 	tool_mass = 0.613955;
+	// 	tool_com = Vector3d(-0.00104997, -0.000560744, 0.0937631);
+	// }
 
 	// remove inertial forces from tool
 	Vector3d tool_velocity = Vector3d::Zero();
@@ -301,7 +292,7 @@ int main() {
 	bool fTimerDidSleep = true;
 
 	// setup data logging
-	string folder = "../../02-dual_proxy_motion_normal_force_robot/data_logging/data/";
+	string folder = "../../00-dual_proxy_motion_normal_force_robot/data_logging/data/";
 	string filename = "data";
     auto logger = new Logging::Logger(10000, folder + filename);
 	

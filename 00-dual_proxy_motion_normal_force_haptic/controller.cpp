@@ -245,7 +245,7 @@ int main(int argc, char* argv[]) {
 	bool fTimerDidSleep = true;
 
 	// setup data logging
-	string folder = "../../02-dual_proxy_motion_normal_force_haptic/data_logging/data/";
+	string folder = "../../00-dual_proxy_motion_normal_force_haptic/data_logging/data/";
 	string filename = "data";
     auto logger = new Logging::Logger(10000, folder + filename);
 

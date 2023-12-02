@@ -6,7 +6,7 @@ SET(CMAKE_BUILD_TYPE "Release")
 
 # set common source
 set (PEG_INSERTION_COMMON_SOURCE)
-# include_directories(${PROJECT_SOURCE_DIR}/src)
+include_directories(${PROJECT_SOURCE_DIR}/src)
 # include_directories(${PROJECT_SOURCE_DIR}/utils)
 
 # set common dependencies
@@ -83,3 +83,4 @@ set (PEG_INSERTION_BINARY_DIR                  ${PROJECT_SOURCE_DIR}/bin)
 
 add_subdirectory(00-dual_proxy_motion_normal_force_haptic)
 add_subdirectory(00-dual_proxy_motion_normal_force_robot)
+add_subdirectory(01-kinesthetic-teaching)

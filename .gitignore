@@ -41,3 +41,5 @@
 # User files
 *.user
 
+# VSCode files
+/.vscode
