@@ -1,4 +1,4 @@
-// This example tests the haptic device driver and the open-loop bilateral teleoperation controller.
+// Controller and Data Logger for kinesthetic teaching of the robot
 
 #include "Sai2Model.h"
 #include "redis/RedisClient.h"
@@ -125,18 +125,53 @@ int main() {
 	joint_task->_kv = 25.0;
 	joint_task->_ki = 50.0;
 
-    joint_task->_desired_position << 
-		-0.137034,
-		0.196574,
-		0.0870424,
-		-2.26689,
-		-0.0722293,
-		2.46444,
-		0.0702875; // initial robot config
+	// Set initial starting configuration for teaching
+    // joint_task->_desired_position << -0.137034, 0.196574, 0.0870424, -2.26689, -0.0722293, 2.46444, 0.0702875; 
+	joint_task->_desired_position << -0.0872258, 0.0112011, -0.0211492, -2.63778, -0.276039, 3.13521, -0.714044;
 
-	// End of Peg task point
+	// PosOri task
 	const string link_name = "end_effector";
 	const Vector3d pos_in_link = Vector3d(0, 0, 0.10);
+	auto posori_task = new Sai2Primitives::PosOriTask(robot, link_name, pos_in_link);
+	Vector3d x_init = posori_task->_current_position;
+	Matrix3d R_init = posori_task->_current_orientation;
+	Matrix3d R_default = Matrix3d::Identity();
+	Vector3d pos_default = Vector3d::Zero();
+	robot->rotation(R_default, link_name);
+	robot->position(pos_default, link_name, pos_in_link);
+
+	// Set Desired Peg Position
+	posori_task->_desired_position << 0.499218,0.034793,0.094611;
+	posori_task->_desired_orientation << 0.999998,-0.001182,-0.001852,
+										 -0.001151,-0.999856,0.016908,
+										 -0.001872,-0.016906,-0.999855;
+
+	VectorXd posori_task_torques = VectorXd::Zero(dof);
+	posori_task->_use_interpolation_flag = false;
+
+	posori_task->_otg->setMaxLinearVelocity(0.30);
+	posori_task->_otg->setMaxLinearAcceleration(1.0);
+	posori_task->_otg->setMaxLinearJerk(5.0);
+
+	posori_task->_otg->setMaxAngularVelocity(M_PI/1.5);
+	posori_task->_otg->setMaxAngularAcceleration(3*M_PI);
+	posori_task->_otg->setMaxAngularJerk(15*M_PI);
+
+	posori_task->_kp_pos = 100.0;
+	posori_task->_kv_pos = 17.0;
+
+	posori_task->_kp_ori = 200.0;
+	posori_task->_kv_ori = 23.0;
+
+	posori_task->_use_velocity_saturation_flag = true;
+	posori_task->_linear_saturation_velocity = 0.3;
+	posori_task->_angular_saturation_velocity = M_PI/2.0;
+
+	// use lambda smoothing instead of lambda truncation
+	posori_task->_use_lambda_truncation_flag = false;
+	posori_task->_e_sing = 1e-1;
+	posori_task->_e_max = 1e-1;  // bounds subject to tuning
+	posori_task->_e_min = 5e-2;
 	
 	Vector3d ee_pos = Vector3d::Zero();
 	Vector3d ee_linear_vel = Vector3d::Zero();
@@ -183,6 +218,10 @@ int main() {
 	// Objects to write to redis
 	redis_client.addEigenToWriteCallback(0, ROBOT_COMMAND_TORQUES_KEY, command_torques);
 
+	// write internal controller state to redis
+    redis_client.addEigenToWriteCallback(0, ROBOT_EE_POS_KEY, posori_task->_current_position);
+    redis_client.addEigenToWriteCallback(0, ROBOT_EE_ORI_KEY, posori_task->_current_orientation);
+
 	// create a timer
 	unsigned long long controller_counter = 0;
 	LoopTimer timer;
@@ -201,33 +240,30 @@ int main() {
     auto logger = new Logging::Logger(10000, folder + filename);
 	
 	VectorXd log_robot_time(1);
+	Vector3d log_robot_ee_pos_error = Vector3d::Zero();
+	Vector3d log_robot_ee_ori_error = Vector3d::Zero();
+	VectorXd log_sensed_force_moments = VectorXd::Zero(6);
+	VectorXd log_robot_ee_orientation = VectorXd::Zero(9);
 	Vector3d log_robot_ee_position = Vector3d::Zero();
 	Vector3d log_robot_ee_linear_velocity = Vector3d::Zero();
 	Vector3d log_robot_ee_angular_velocity = Vector3d::Zero();
 	VectorXd log_joint_angles = robot->_q;
 	VectorXd log_joint_velocities = robot->_dq;
-	VectorXd log_sensed_force_moments = VectorXd::Zero(6);
-	VectorXd log_robot_ee_orientation = VectorXd::Zero(9);
 
 	logger->addVectorToLog(&log_robot_time, "robot_time");
-	logger->addVectorToLog(&log_robot_ee_position, "robot_ee_position");
-	// logger->addVectorToLog(&log_robot_ee_linear_velocity, "robot_ee_linear_velocity");
-	// logger->addVectorToLog(&log_robot_ee_angular_velocity, "robot_ee_angular_velocity");
-	// logger->addVectorToLog(&log_joint_angles, "joint_angles");
-	// logger->addVectorToLog(&log_joint_velocities, "joint_velocities");
-	logger->addVectorToLog(&log_robot_ee_orientation, "robot_ee_orientation");
+	logger->addVectorToLog(&log_robot_ee_pos_error, "robot_ee_pos_error");
+	logger->addVectorToLog(&log_robot_ee_ori_error, "robot_ee_ori_error");		
 	logger->addVectorToLog(&log_sensed_force_moments, "sensed_forces_moments");
+	logger->addVectorToLog(&log_robot_ee_position, "robot_ee_position");
+	logger->addVectorToLog(&log_robot_ee_orientation, "robot_ee_orientation");
+	logger->addVectorToLog(&log_robot_ee_linear_velocity, "robot_ee_linear_velocity");
+	logger->addVectorToLog(&log_robot_ee_angular_velocity, "robot_ee_angular_velocity");
+	logger->addVectorToLog(&log_joint_angles, "joint_angles");
+	logger->addVectorToLog(&log_joint_velocities, "joint_velocities");
+
 
 
 	bool printed_control_status = false;
-
-
-	// timer.waitForNextLoop();
-	// if(redis_client.get(HAPTIC_CONTROLLER_RUNNING_KEY) != "0") {
-	// 	logger->start();
-	// 	std::cout << "starting robot logger" << endl;
-	// 	runloop = false;
-	// }
 
 	// // start particle filter thread
 	// runloop = true;
@@ -262,6 +298,9 @@ int main() {
 
 		N_prec.setIdentity(dof,dof);
 
+		posori_task->updateTaskModel(N_prec);
+		N_prec = posori_task->_N;
+
 		joint_task->updateTaskModel(N_prec);
 
 		// add bias and ee weight to sensed forces
@@ -280,6 +319,10 @@ int main() {
 		}
 		sensed_force_moment_local_frame.head(3) -= init_force;
 
+		// update forces for posori task
+		posori_task->updateSensedForceAndMoment(sensed_force_moment_local_frame.head(3), sensed_force_moment_local_frame.tail(3));
+		sensed_force_moment_world_frame.head(3) = R_world_sensor * sensed_force_moment_local_frame.head(3);
+		sensed_force_moment_world_frame.tail(3) = R_world_sensor * sensed_force_moment_local_frame.tail(3);
 
 		if(state == INIT) {
 			printed_control_status = false;
@@ -315,6 +358,18 @@ int main() {
 				std::cout << "starting robot logger" << endl;
 				std::cout << "begin kinesthetic teaching" << endl;
 				printed_control_status = true;
+			}
+
+			try	{
+				posori_task->computeTorques(posori_task_torques);
+			}
+			catch(exception e) {
+				cout << "control cycle: " << controller_counter << endl;
+				cout << "error in the torque computation of posori_task:" << endl;
+				cerr << e.what() << endl;
+				cout << "setting torques to zero for this control cycle" << endl;
+				cout << endl;
+				// posori_task_torques.setZero(); // set task torques to zero, TODO: test this
 			}
 
 			// command_torques = coriolis;	
@@ -355,17 +410,17 @@ int main() {
 		robot->linearVelocity(ee_linear_vel, link_name, pos_in_link);
 		robot->angularVelocity(ee_angular_vel, link_name, pos_in_link);
 		robot->rotation(ee_ori, link_name);
-		
 
 		log_robot_time(0) = current_time;
+		log_robot_ee_pos_error = ee_pos - posori_task->_desired_position;
+		log_robot_ee_ori_error = posori_task->_orientation_error;
+		log_sensed_force_moments = sensed_force_moment_local_frame;	
 		log_robot_ee_position = ee_pos;
+		log_robot_ee_orientation = Map<VectorXd>(ee_ori.data(), ee_ori.size());
 		log_robot_ee_linear_velocity = ee_linear_vel;
 		log_robot_ee_angular_velocity = ee_angular_vel;
 		log_joint_angles = robot->_q;
-		log_joint_velocities = robot->_dq;
-		log_sensed_force_moments = sensed_force_moment_local_frame;
-		log_robot_ee_orientation = Map<VectorXd>(ee_ori.data(), ee_ori.size());
-	
+		log_joint_velocities = robot->_dq;		
 		prev_time = current_time;
 		controller_counter++;
 	}
