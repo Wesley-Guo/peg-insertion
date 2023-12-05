@@ -1,4 +1,4 @@
-// Controller and Data Logger for kinesthetic teaching of the robot
+// This example tests the haptic device driver and the open-loop bilateral teleoperation controller.
 
 #include "Sai2Model.h"
 #include "redis/RedisClient.h"
@@ -28,20 +28,18 @@ const string robot_file = "./resources/panda_arm.urdf";
 
 // redis keys:
 // robot local control loop
-string JOINT_ANGLES_KEY = "sai2::PegInsertion::01::simviz::sensors::q";
-string JOINT_VELOCITIES_KEY = "sai2::PegInsertion::01::simviz::sensors::dq";
-string ROBOT_COMMAND_TORQUES_KEY = "sai2::PegInsertion::01::simviz::actuators::tau_cmd";
-
-string ROBOT_SENSED_FORCE_KEY = "sai2::PegInsertion::01::simviz::sensors::sensed_force";
-
+string JOINT_ANGLES_KEY = "sai2::PegInsertion::02::simviz::sensors::q";
+string JOINT_VELOCITIES_KEY = "sai2::PegInsertion::02::simviz::sensors::dq";
+string ROBOT_COMMAND_TORQUES_KEY = "sai2::PegInsertion::02::simviz::actuators::tau_cmd";
+string ROBOT_SENSED_FORCE_KEY = "sai2::PegInsertion::02::simviz::sensors::sensed_force";
 string MASSMATRIX_KEY;
 string CORIOLIS_KEY;
 
 // posori task state information
-string ROBOT_EE_POS_KEY = "sai2::PegInsertion::01::robot::ee_pos";
-string ROBOT_EE_ORI_KEY = "sai2::PegInsertion::01::robot::ee_ori";
-string ROBOT_EE_FORCE_KEY = "sai2::PegInsertion::01::robot::ee_force";
-string ROBOT_EE_MOMENT_KEY = "sai2::PegInsertion::01::robot::ee_moment";
+string ROBOT_EE_POS_KEY = "sai2::PegInsertion::02::robot::ee_pos";
+string ROBOT_EE_ORI_KEY = "sai2::PegInsertion::02::robot::ee_ori";
+string ROBOT_EE_FORCE_KEY = "sai2::PegInsertion::02::robot::ee_force";
+string ROBOT_EE_MOMENT_KEY = "sai2::PegInsertion::02::robot::ee_moment";
 
 RedisClient redis_client;
 
@@ -125,9 +123,7 @@ int main() {
 	joint_task->_kv = 25.0;
 	joint_task->_ki = 50.0;
 
-	// Set initial starting configuration for teaching
-    // joint_task->_desired_position << -0.137034, 0.196574, 0.0870424, -2.26689, -0.0722293, 2.46444, 0.0702875; 
-	joint_task->_desired_position << -0.0872258, 0.0112011, -0.0211492, -2.63778, -0.276039, 3.13521, -0.714044;
+    joint_task->_desired_position = robot->_q; // use current robot config as init config
 
 	// PosOri task
 	const string link_name = "end_effector";
@@ -139,12 +135,6 @@ int main() {
 	Vector3d pos_default = Vector3d::Zero();
 	robot->rotation(R_default, link_name);
 	robot->position(pos_default, link_name, pos_in_link);
-
-	// Set Desired Peg Position
-	posori_task->_desired_position << 0.499218,0.034793,0.094611;
-	posori_task->_desired_orientation << 0.999998,-0.001182,-0.001852,
-										 -0.001151,-0.999856,0.016908,
-										 -0.001872,-0.016906,-0.999855;
 
 	VectorXd posori_task_torques = VectorXd::Zero(dof);
 	posori_task->_use_interpolation_flag = false;
@@ -177,6 +167,11 @@ int main() {
 	Vector3d ee_linear_vel = Vector3d::Zero();
 	Vector3d ee_angular_vel = Vector3d::Zero();
 	Matrix3d ee_ori = Matrix3d::Identity();
+
+	// for policy rollouts
+	bool action_available = false;
+	Vector3d next_pos_action = Vector3d::Zero();
+	double time_counter = 0.0;
 
 	// force sensing
 	Matrix3d R_link_sensor = Matrix3d::Identity();
@@ -235,7 +230,7 @@ int main() {
 	double time_until_float = 0;
 
 	// setup data logging
-	string folder = "../../01-kinesthetic-teaching/data_logging/data/";
+	string folder = "../../02-kinesthetic-teaching/data_logging/data/";
 	string filename = "data";
     auto logger = new Logging::Logger(10000, folder + filename);
 	
@@ -261,8 +256,6 @@ int main() {
 	logger->addVectorToLog(&log_joint_angles, "joint_angles");
 	logger->addVectorToLog(&log_joint_velocities, "joint_velocities");
 
-	bool printed_control_status = false;
-
 	// // start particle filter thread
 	// runloop = true;
 	// redis_client.set(CONTROLLER_RUNNING_KEY,"1");
@@ -272,8 +265,6 @@ int main() {
 	std::cout << "starting robot controller" << endl;
 	double start_time = timer.elapsedTime(); //secs
 	runloop = true;
-
-	time_until_float = 0.0;
 
 	while (runloop) {
 		// wait for next scheduled loop
@@ -323,7 +314,7 @@ int main() {
 		sensed_force_moment_world_frame.tail(3) = R_world_sensor * sensed_force_moment_local_frame.tail(3);
 
 		if(state == INIT) {
-			printed_control_status = false;
+			logger->start();
 			joint_task->updateTaskModel(MatrixXd::Identity(dof,dof));
 
 			joint_task->computeTorques(joint_task_torques);
@@ -331,31 +322,32 @@ int main() {
 
 			if((joint_task->_desired_position - joint_task->_current_position).norm() < 0.1) {
 
-				time_until_float +=  dt;
-				// std::cout << std::to_string(time_until_float) << endl;
+				// Reinitialize controllers
+				posori_task->reInitializeTask();
+				joint_task->reInitializeTask();
 
-				if (time_until_float > 10)
-				{
-					state = CONTROL;
-				}
+				joint_task->_kp = 50.0;
+				joint_task->_kv = 13.0;
+				joint_task->_ki = 0.0;
+				
+				state = CONTROL;
 			}
 		}
 
 		else if(state == CONTROL) {
-			
-			// Reinitialize controllers
-			joint_task->reInitializeTask();
 
-			joint_task->_kp = 50.0;
-			joint_task->_kv = 13.0;
-			joint_task->_ki = 0.0;
+			time_counter += dt;
 
-			if(!printed_control_status){
-				// Start logging 
-				logger->start();
-				std::cout << "starting robot logger" << endl;
-				std::cout << "begin kinesthetic teaching" << endl;
-				printed_control_status = true;
+			if(time_counter > 0.1){
+				cout << "incrementing action" << endl;
+				action_available = true;
+				time_counter = 0;
+			}
+
+			if(action_available){
+				next_pos_action << 0.0001, 0.000, 0.000; 
+				posori_task->_desired_position +=next_pos_action;
+				action_available = false;
 			}
 
 			try	{
@@ -370,8 +362,10 @@ int main() {
 				// posori_task_torques.setZero(); // set task torques to zero, TODO: test this
 			}
 
-			// command_torques = coriolis;	
-			command_torques.setZero();
+			joint_task->computeTorques(joint_task_torques);
+
+			command_torques = posori_task_torques + joint_task_torques + coriolis;	
+			// command_torques.setZero();
 		}
 
 		// write control
