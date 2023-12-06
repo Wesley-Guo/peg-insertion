@@ -127,11 +127,13 @@ int main() {
 
 	// Set initial starting configuration for teaching
     // joint_task->_desired_position << -0.137034, 0.196574, 0.0870424, -2.26689, -0.0722293, 2.46444, 0.0702875; 
-	joint_task->_desired_position << -0.0872258, 0.0112011, -0.0211492, -2.63778, -0.276039, 3.13521, -0.714044;
+	// joint_task->_desired_position << -0.0872258, 0.0112011, -0.0211492, -2.63778, -0.276039, 3.13521, -0.714044; // 12-02-23 Data Collection Position
+	joint_task->_desired_position = robot->_q; // use current robot config as init config
 
 	// PosOri task
 	const string link_name = "end_effector";
-	const Vector3d pos_in_link = Vector3d(0, 0, 0.10);
+	// const Vector3d pos_in_link = Vector3d(0, 0, 0.10); // distance to tip-of-peg mounted on force sensor
+	const Vector3d pos_in_link = Vector3d(0, 0, 0.169); // distance to center of stock panda gripper contact patches mounted on force sensor
 	auto posori_task = new Sai2Primitives::PosOriTask(robot, link_name, pos_in_link);
 	Vector3d x_init = posori_task->_current_position;
 	Matrix3d R_init = posori_task->_current_orientation;

@@ -127,7 +127,8 @@ int main() {
 
 	// PosOri task
 	const string link_name = "end_effector";
-	const Vector3d pos_in_link = Vector3d(0, 0, 0.10);
+	// const Vector3d pos_in_link = Vector3d(0, 0, 0.10);
+	const Vector3d pos_in_link = Vector3d(0, 0, 0.169); // distance to center of stock panda gripper contact patches mounted on force sensor
 	auto posori_task = new Sai2Primitives::PosOriTask(robot, link_name, pos_in_link);
 	Vector3d x_init = posori_task->_current_position;
 	Matrix3d R_init = posori_task->_current_orientation;
@@ -157,6 +158,11 @@ int main() {
 	posori_task->_linear_saturation_velocity = 0.3;
 	posori_task->_angular_saturation_velocity = M_PI/2.0;
 
+	posori_task->_desired_position << 0.499218,0.034793,0.094611;
+	posori_task->_desired_orientation << 0.999998,-0.001182,-0.001852,
+										 -0.001151,-0.999856,0.016908,
+										 -0.001872,-0.016906,-0.999855;
+
 	// use lambda smoothing instead of lambda truncation
 	posori_task->_use_lambda_truncation_flag = false;
 	posori_task->_e_sing = 1e-1;
@@ -171,6 +177,8 @@ int main() {
 	// for policy rollouts
 	bool action_available = false;
 	Vector3d next_pos_action = Vector3d::Zero();
+	Vector3d next_ori_action = Vector3d::Zero();
+	Matrix3d rotation_change = Matrix3d::Identity();
 	double time_counter = 0.0;
 
 	// force sensing
@@ -347,6 +355,39 @@ int main() {
 			if(action_available){
 				next_pos_action << 0.0001, 0.000, 0.000; 
 				posori_task->_desired_position +=next_pos_action;
+
+				// cout << "current orientation: " << posori_task->_current_orientation << endl;
+
+
+				// next_ori_action << 0.000, 0.000, 0.1;
+				// Vector3d rc1 = posori_task->_current_orientation.block<3,1>(0,0);
+				// Vector3d rc2 = posori_task->_current_orientation.block<3,1>(0,1);
+				// Vector3d rc3 = posori_task->_current_orientation.block<3,1>(0,2);
+				// cout << "rc1: " << rc1 << endl;
+
+				// Vector3d delta_r1 = -rc1.cross(next_ori_action);
+				// Vector3d delta_r2 = -rc2.cross(next_ori_action);
+				// Vector3d delta_r3 = -rc3.cross(next_ori_action);
+				// cout << "delta_r1: " << delta_r1 << endl;
+
+
+				// rotation_change.block<3,1>(0,0) = delta_r1;
+				// rotation_change.block<3,1>(0,1) = delta_r2;
+				// rotation_change.block<3,1>(0,2) = delta_r3;
+
+				// rotation_change << 0.9987503, -0.0499792,  0.0000000, 0.0499792,  0.9987503,  0.0000000, 0.0000000,  0.0000000,  1.0000000;
+
+				// rotation_change << 0.9999875, -0.0050000,  0.0000000, 0.0050000,  0.9999875,  0.0000000, 0.0000000,  0.0000000,  1.000000;
+
+  				rotation_change << 0.9999995, -0.0010000,  0.0000000, 0.0010000,  0.9999995,  0.0000000, 0.0000000,  0.0000000,  1.0000000;
+
+				posori_task->_desired_orientation = posori_task->_desired_orientation * rotation_change;
+
+				// cout << "rotation change: " << rotation_change << endl;
+				// cout << "current orientation: " << posori_task->_current_orientation << endl;
+				// cout << "desired orientation: " << posori_task->_desired_orientation << endl;
+				// cout << "delta_phi" << posori_task->_orientation_error << endl;
+
 				action_available = false;
 			}
 
