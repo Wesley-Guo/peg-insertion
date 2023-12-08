@@ -43,3 +43,8 @@
 
 # VSCode files
 /.vscode
+
+#ipython notebook and data
+/.ipynb_checkpoints
+/data-and-learning/.ipynb_checkpoints
+

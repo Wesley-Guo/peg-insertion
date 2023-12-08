@@ -127,8 +127,8 @@ int main() {
 
 	// PosOri task
 	const string link_name = "end_effector";
-	// const Vector3d pos_in_link = Vector3d(0, 0, 0.10);
-	const Vector3d pos_in_link = Vector3d(0, 0, 0.169); // distance to center of stock panda gripper contact patches mounted on force sensor
+	const Vector3d pos_in_link = Vector3d(0, 0, 0.10);
+	// const Vector3d pos_in_link = Vector3d(0, 0, 0.169); // distance to center of stock panda gripper contact patches mounted on force sensor
 	auto posori_task = new Sai2Primitives::PosOriTask(robot, link_name, pos_in_link);
 	Vector3d x_init = posori_task->_current_position;
 	Matrix3d R_init = posori_task->_current_orientation;
@@ -175,11 +175,124 @@ int main() {
 	Matrix3d ee_ori = Matrix3d::Identity();
 
 	// for policy rollouts
-	bool action_available = false;
-	Vector3d next_pos_action = Vector3d::Zero();
-	Vector3d next_ori_action = Vector3d::Zero();
-	Matrix3d rotation_change = Matrix3d::Identity();
+	bool take_action = false;
 	double time_counter = 0.0;
+	VectorXd current_state_vector = VectorXd::Zero(9);
+	VectorXd squared_current_state_vector = VectorXd::Zero(9);
+	RowVectorXd row_current_state_vector = RowVectorXd::Zero(9);
+	RowVectorXd row_squared_current_state_vector = RowVectorXd::Zero(9);
+	// MatrixXd current_state_vector = MatrixXd::Zero(1,9);
+	// MatrixXd squared_current_state_vector = MatrixXd::Zero(1,9);
+
+	// discrete amount to change XYZ position and orientation by
+	double action_dx = 0.00005;
+	double action_dy = 0.00005;
+	double action_dz = 0.00005;
+	double action_drot_x = 0.0002;
+	double action_drot_y = 0.0002;
+	double action_drot_z = 0.0002;
+
+	// each matrix represents a discrete rotation of 0.001 radians about that particular axis
+	Matrix3d d_rot_x = Matrix3d::Identity();
+	d_rot_x << 1.0000000,  0.0000000,  0.0000000,
+				0.0000000,  0.9999995, -0.0010000,
+				0.0000000,  0.0010000,  0.9999995; 
+	Matrix3d d_rot_y = Matrix3d::Identity();
+	d_rot_y << 0.9999995,  0.0000000,  0.0010000,
+				0.0000000,  1.0000000,  0.0000000,
+				-0.0010000,  0.0000000,  0.9999995;
+	Matrix3d d_rot_z = Matrix3d::Identity();
+	d_rot_z << 0.9999995, -0.0010000,  0.0000000,
+				0.0010000,  0.9999995,  0.0000000,
+				0.0000000,  0.0000000,  1.0000000;
+
+	int num_actions = 3;
+
+	MatrixXd action_space = MatrixXd::Zero(729,6);
+	int counter = 0;
+	for (int i = 0; i < num_actions; i++)
+	{
+		for (int j = 0; j < num_actions; j++)
+		{
+			for (int k = 0; k < num_actions; k++)
+			{
+				for (int l = 0; l < num_actions; l++)
+				{
+					for (int m = 0; m < num_actions; m++)
+					{
+						for (int n = 0; n < num_actions; n++)
+						{
+							action_space(counter, 0) = (i-1)*action_dx;
+							action_space(counter, 1) = (j-1)*action_dy;
+							action_space(counter, 2) = (k-1)*action_dz;
+							action_space(counter, 3) = (l-1)*action_drot_x;
+							action_space(counter, 4) = (m-1)*action_drot_y;
+							action_space(counter, 5) = (n-1)*action_drot_z;
+							counter++;
+						}
+						
+					}
+					
+				}
+				
+			}
+			
+		}
+		
+	} 
+
+	Vector3d target_position = Vector3d::Zero();
+	Matrix3d target_orientation = Matrix3d::Identity();
+	target_position << 0.499218,0.034793,0.094611;
+	target_orientation << 0.999998,-0.001182,-0.001852,
+						 -0.001151,-0.999856,0.016908,
+						 -0.001872,-0.016906,-0.999855;
+	Vector3d delta_phi_to_target = Vector3d::Zero();
+
+	MatrixXd full_state_action_matrix = MatrixXd::Zero(729,31); 
+	full_state_action_matrix.block(0,18,729,6) = action_space;
+	full_state_action_matrix.block(0,24,729,6) = action_space.array().square();
+	full_state_action_matrix.block(0,30,729,1) = MatrixXd::Ones(729,1);
+
+	VectorXd learned_Q_coeffs = VectorXd::Zero(31);
+	// 1 iteration Q
+	learned_Q_coeffs << 9997.673572763137,
+						10029.711078054957,
+						9913.030607544346,
+						10147.980245277327,
+						10109.204524252911,
+						9169.992957099179,
+						93.36279917063167,
+						-118.0772884150589,
+						-9.30509378706723,
+						99.63787149952451,
+						98.02727979557238,
+						90.97939061258778,
+						52.4867132308647,
+						47.09412243544257,
+						-438.65550027475234,
+						143.43451711275117,
+						38.28822858445434,
+						27.59799888599903,
+						9999.974241771371,
+						9999.972741717036,
+						9999.974828278193,
+						9999.919454683142,
+						9999.920741770144,
+						9999.91510656977,
+						99.99999876109834,
+						99.9999986829135,
+						99.9999988161937,
+						99.9999849905193,
+						99.99998301148004,
+						99.99998059293335,
+						-820.912196674631;
+	VectorXd estimated_Qs = VectorXd::Zero(729);
+	double max_action_Q;
+	int max_action_index;
+	
+	// cout << "action_space " << endl << action_space << endl << endl;
+
 
 	// force sensing
 	Matrix3d R_link_sensor = Matrix3d::Identity();
@@ -346,49 +459,75 @@ int main() {
 
 			time_counter += dt;
 
-			if(time_counter > 0.1){
-				cout << "incrementing action" << endl;
-				action_available = true;
-				time_counter = 0;
+			if(time_counter > 0.5){
+				// cout << "incrementing action" << endl;
+				take_action = true;
+				time_counter = 0.0;
 			}
 
-			if(action_available){
-				next_pos_action << 0.0001, 0.000, 0.000; 
-				posori_task->_desired_position +=next_pos_action;
+			if(take_action){
+				
+				// establish current state
+				Sai2Model::orientationError(delta_phi_to_target, target_orientation, posori_task->_current_orientation);
+				current_state_vector << (posori_task->_current_position - target_position), delta_phi_to_target, sensed_force_moment_local_frame.head(3); 
+				squared_current_state_vector = current_state_vector.array().square();
+				row_current_state_vector = current_state_vector.transpose();
+				row_squared_current_state_vector = squared_current_state_vector.transpose();
+				
+				// Compute Q values for all possible actions from current state
+				full_state_action_matrix.block(0,0,729,9) = row_current_state_vector.replicate<729,1>();
+				full_state_action_matrix.block(0,9,729,9) = row_squared_current_state_vector.replicate<729,1>();
+				estimated_Qs = full_state_action_matrix*learned_Q_coeffs;
+				max_action_Q = estimated_Qs.maxCoeff(&max_action_index);
 
-				// cout << "current orientation: " << posori_task->_current_orientation << endl;
+				// apply maximum action changes to desired positions
+				posori_task->_desired_position += action_space.block(max_action_index, 0, 1,3);
+
+				// apply maximum action changes to desired orientation
+				
+				// Z rotations
+				if (action_space(max_action_index, 5) < 0.0) // negative Z rotation
+				{
+					posori_task->_desired_orientation = d_rot_z.transpose() * posori_task->_desired_orientation;
+				}
+				else if (action_space(max_action_index, 5) > 0.0) // positive Z rotation
+				{
+					posori_task->_desired_orientation = d_rot_z * posori_task->_desired_orientation;
+				}
+
+				// Y Rotations
+				if (action_space(max_action_index, 4) < 0.0) // negative Z rotation
+				{
+					posori_task->_desired_orientation = d_rot_y.transpose() * posori_task->_desired_orientation;
+				}
+				else if (action_space(max_action_index, 4) > 0.0) // positive Z rotation
+				{
+					posori_task->_desired_orientation = d_rot_y * posori_task->_desired_orientation;
+				}
+
+				// X Rotations
+				if (action_space(max_action_index, 3) < 0.0) // negative Z rotation
+				{
+					posori_task->_desired_orientation = d_rot_x.transpose() * posori_task->_desired_orientation;
+				}
+				else if (action_space(max_action_index, 3) > 0.0) // positive Z rotation
+				{
+					posori_task->_desired_orientation = d_rot_x * posori_task->_desired_orientation;
+				}
+				// cout << "current state: " << endl << row_current_state_vector << endl << endl;
+				// cout << "expanded state: " << endl << row_current_state_vector.replicate<729,1>() << endl << endl;
+				// cout << "state action matrix: " << endl << full_state_action_matrix << endl << endl;
+				
+				// cout << "estimated_Qs: " << endl << estimated_Qs << endl << endl;
 
 
-				// next_ori_action << 0.000, 0.000, 0.1;
-				// Vector3d rc1 = posori_task->_current_orientation.block<3,1>(0,0);
-				// Vector3d rc2 = posori_task->_current_orientation.block<3,1>(0,1);
-				// Vector3d rc3 = posori_task->_current_orientation.block<3,1>(0,2);
-				// cout << "rc1: " << rc1 << endl;
+				cout << "max_action: " << endl << action_space.row(max_action_index)<< endl << endl;
+				cout << "pos_error_to_target: " <<  endl <<(posori_task->_current_position - target_position) << endl << endl;
+				cout << "delta_phi_to_target: " <<  endl << delta_phi_to_target << endl << endl ;
 
-				// Vector3d delta_r1 = -rc1.cross(next_ori_action);
-				// Vector3d delta_r2 = -rc2.cross(next_ori_action);
-				// Vector3d delta_r3 = -rc3.cross(next_ori_action);
-				// cout << "delta_r1: " << delta_r1 << endl;
+				take_action = false;
 
 
-				// rotation_change.block<3,1>(0,0) = delta_r1;
-				// rotation_change.block<3,1>(0,1) = delta_r2;
-				// rotation_change.block<3,1>(0,2) = delta_r3;
-
-				// rotation_change << 0.9987503, -0.0499792,  0.0000000, 0.0499792,  0.9987503,  0.0000000, 0.0000000,  0.0000000,  1.0000000;
-
-				// rotation_change << 0.9999875, -0.0050000,  0.0000000, 0.0050000,  0.9999875,  0.0000000, 0.0000000,  0.0000000,  1.000000;
-
-  				rotation_change << 0.9999995, -0.0010000,  0.0000000, 0.0010000,  0.9999995,  0.0000000, 0.0000000,  0.0000000,  1.0000000;
-
-				posori_task->_desired_orientation = posori_task->_desired_orientation * rotation_change;
-
-				// cout << "rotation change: " << rotation_change << endl;
-				// cout << "current orientation: " << posori_task->_current_orientation << endl;
-				// cout << "desired orientation: " << posori_task->_desired_orientation << endl;
-				// cout << "delta_phi" << posori_task->_orientation_error << endl;
-
-				action_available = false;
 			}
 
 			try	{
@@ -405,8 +544,8 @@ int main() {
 
 			joint_task->computeTorques(joint_task_torques);
 
-			command_torques = posori_task_torques + joint_task_torques + coriolis;	
-			// command_torques.setZero();
+			// command_torques = posori_task_torques + joint_task_torques + coriolis;	
+			command_torques.setZero();
 		}
 
 		// write control
@@ -443,9 +582,10 @@ int main() {
 		robot->linearVelocity(ee_linear_vel, link_name, pos_in_link);
 		robot->angularVelocity(ee_angular_vel, link_name, pos_in_link);
 		robot->rotation(ee_ori, link_name);
+		Sai2Model::orientationError(delta_phi_to_target, target_orientation, ee_ori);
 
 		log_robot_time(0) = current_time;
-		log_robot_ee_pos_error = ee_pos - posori_task->_desired_position;
+		log_robot_ee_pos_error = ee_pos - target_position;
 		log_robot_ee_ori_error = posori_task->_orientation_error;
 		log_sensed_force_moments = sensed_force_moment_local_frame;	
 		log_robot_ee_position = ee_pos;

@@ -132,8 +132,8 @@ int main() {
 
 	// PosOri task
 	const string link_name = "end_effector";
-	// const Vector3d pos_in_link = Vector3d(0, 0, 0.10); // distance to tip-of-peg mounted on force sensor
-	const Vector3d pos_in_link = Vector3d(0, 0, 0.169); // distance to center of stock panda gripper contact patches mounted on force sensor
+	const Vector3d pos_in_link = Vector3d(0, 0, 0.10); // distance to tip-of-peg mounted on force sensor
+	// const Vector3d pos_in_link = Vector3d(0, 0, 0.169); // distance to center of stock panda gripper contact patches mounted on force sensor
 	auto posori_task = new Sai2Primitives::PosOriTask(robot, link_name, pos_in_link);
 	Vector3d x_init = posori_task->_current_position;
 	Matrix3d R_init = posori_task->_current_orientation;
