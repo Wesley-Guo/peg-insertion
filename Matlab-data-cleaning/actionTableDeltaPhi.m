@@ -3,7 +3,7 @@ format long;
 
 %raw_data = csvread('data_2023-12-02.16.48.48.csv',1,2);
 
-numOfTraj = 11;
+numOfTraj = 23;
 
 for k = 1:numOfTraj
     filename = strcat(int2str(k), '.csv');

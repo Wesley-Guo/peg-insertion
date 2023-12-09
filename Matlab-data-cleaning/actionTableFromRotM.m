@@ -1,7 +1,7 @@
 clear all; clc
 format long;
 
-numOfTraj = 11;
+numOfTraj = 23;
 
 for i = 1:numOfTraj
     filename = strcat(int2str(i), '.csv');

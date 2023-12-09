@@ -5,23 +5,24 @@ action = zeros(numActionComponents,1);
 posThreshold = 0.00005;
 oriThreshold = .0002;
 
-for i = 1:numActionComponents
-    if i <= 3
-        if abs(difference(i)) < posThreshold
-            action(i) = 0;
-        elseif difference < posThreshold
-            action(i) = -posThreshold;
-        else
-            action(i) = posThreshold;
-        end
+%find max pos delta
+[max_pos, pos_idx] = max(abs(difference(1, 1:3)));
+[max_ori, ori_idx] = max(abs(difference(1, 4:6)));
+ori_idx = ori_idx+3;
+
+if max_pos >= posThreshold
+    if difference(pos_idx) >= posThreshold
+        action(pos_idx) = posThreshold;
     else
-        if abs(difference(i)) < oriThreshold
-            action(i) = 0;
-        elseif difference < oriThreshold
-            action(i) = -oriThreshold;
-        else
-            action(i) = oriThreshold;
-        end
+        action(pos_idx) = -posThreshold;
+    end
+end
+
+if max_ori >= oriThreshold
+    if difference(ori_idx) >= oriThreshold
+        action(ori_idx) = oriThreshold;
+    else
+        action(ori_idx) = -oriThreshold;
     end
 end
 
