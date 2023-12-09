@@ -10,6 +10,7 @@
 #include "perception/ForceSpaceParticleFilter.h"
 
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <random>
 #include <queue>
@@ -75,6 +76,9 @@ const Vector3d sensor_pos_in_link = Eigen::Vector3d(0.0,0.0,0.0406);
 
 // particle filter loop
 void particle_filter();
+
+// CSV Reader
+void readCSVIntoVector(Eigen::VectorXd& storage_vector, std::istream& str);
 
 const bool flag_simulation = false;
 // const bool flag_simulation = true;
@@ -177,12 +181,21 @@ int main() {
 	// for policy rollouts
 	bool take_action = false;
 	double time_counter = 0.0;
+
+	Vector3d target_position = Vector3d::Zero();
+	Matrix3d target_orientation = Matrix3d::Identity();
+	target_position << 0.499218,0.034793,0.094611;
+	target_orientation << 0.999998,-0.001182,-0.001852,
+						 -0.001151,-0.999856,0.016908,
+						 -0.001872,-0.016906,-0.999855;
+	Vector3d delta_phi_to_target = Vector3d::Zero();
+	
 	VectorXd current_state_vector = VectorXd::Zero(9);
 	VectorXd squared_current_state_vector = VectorXd::Zero(9);
 	RowVectorXd row_current_state_vector = RowVectorXd::Zero(9);
 	RowVectorXd row_squared_current_state_vector = RowVectorXd::Zero(9);
-	// MatrixXd current_state_vector = MatrixXd::Zero(1,9);
-	// MatrixXd squared_current_state_vector = MatrixXd::Zero(1,9);
+	RowVectorXd combined_state_row_vector = RowVectorXd::Zero(18);
+
 
 	// discrete amount to change XYZ position and orientation by
 	double action_dx = 0.00005;
@@ -191,6 +204,8 @@ int main() {
 	double action_drot_x = 0.0002;
 	double action_drot_y = 0.0002;
 	double action_drot_z = 0.0002;
+	double pos_delta = 0.00005;
+	double ori_delta = 0.0002;
 
 	// each matrix represents a discrete rotation of 0.001 radians about that particular axis
 	Matrix3d d_rot_x = Matrix3d::Identity();
@@ -208,91 +223,63 @@ int main() {
 
 	int num_actions = 3;
 
-	MatrixXd action_space = MatrixXd::Zero(729,6);
-	int counter = 0;
-	for (int i = 0; i < num_actions; i++)
+	MatrixXd action_space = MatrixXd::Zero(49,6);
+	MatrixXd action_pos_mat = MatrixXd::Zero(7,3);
+	MatrixXd action_ori_mat = MatrixXd::Zero(7,3);
+
+	int action_constructor_counter = 0;
+	for (size_t i = 0; i < 3 ; i++)
 	{
-		for (int j = 0; j < num_actions; j++)
+		action_pos_mat(action_constructor_counter, i) = pos_delta;
+		action_constructor_counter  += 1;
+		action_pos_mat(action_constructor_counter, i) = -pos_delta;
+		action_constructor_counter  += 1;
+	}
+	
+	action_constructor_counter = 0;
+
+	for (size_t i = 0; i < 3 ; i++)
+	{
+		action_ori_mat(action_constructor_counter, i) = ori_delta;
+		action_constructor_counter  += 1;
+		action_ori_mat(action_constructor_counter, i) = -ori_delta;
+		action_constructor_counter  += 1;
+	}
+
+	action_constructor_counter = 0;
+	for (size_t i = 0; i < 7; i++)
+	{
+		for (size_t j = 0; j < 7; j++)
 		{
-			for (int k = 0; k < num_actions; k++)
-			{
-				for (int l = 0; l < num_actions; l++)
-				{
-					for (int m = 0; m < num_actions; m++)
-					{
-						for (int n = 0; n < num_actions; n++)
-						{
-							action_space(counter, 0) = (i-1)*action_dx;
-							action_space(counter, 1) = (j-1)*action_dy;
-							action_space(counter, 2) = (k-1)*action_dz;
-							action_space(counter, 3) = (l-1)*action_drot_x;
-							action_space(counter, 4) = (m-1)*action_drot_y;
-							action_space(counter, 5) = (n-1)*action_drot_z;
-							counter++;
-						}
-						
-					}
-					
-				}
-				
-			}
-			
+			action_space.block(action_constructor_counter,0,1,3) = action_pos_mat.row(i);
+			action_space.block(action_constructor_counter,3,1,3) = action_ori_mat.row(j);
+			action_constructor_counter += 1;
 		}
 		
-	} 
+	}
+		
+	std::cout << "action_space " << endl << action_space << endl << endl;
 
-	Vector3d target_position = Vector3d::Zero();
-	Matrix3d target_orientation = Matrix3d::Identity();
-	target_position << 0.499218,0.034793,0.094611;
-	target_orientation << 0.999998,-0.001182,-0.001852,
-						 -0.001151,-0.999856,0.016908,
-						 -0.001872,-0.016906,-0.999855;
-	Vector3d delta_phi_to_target = Vector3d::Zero();
-
-	MatrixXd full_state_action_matrix = MatrixXd::Zero(729,31); 
-	full_state_action_matrix.block(0,18,729,6) = action_space;
-	full_state_action_matrix.block(0,24,729,6) = action_space.array().square();
-	full_state_action_matrix.block(0,30,729,1) = MatrixXd::Ones(729,1);
+	MatrixXd mapped_states_matrix = MatrixXd::Zero(49,883); 
+	mapped_states_matrix.block(0,883,49,1) = MatrixXd::Ones(49,1);
 
 	VectorXd learned_Q_coeffs = VectorXd::Zero(31);
-	// 1 iteration Q
-	learned_Q_coeffs << 9997.673572763137,
-						10029.711078054957,
-						9913.030607544346,
-						10147.980245277327,
-						10109.204524252911,
-						9169.992957099179,
-						93.36279917063167,
-						-118.0772884150589,
-						-9.30509378706723,
-						99.63787149952451,
-						98.02727979557238,
-						90.97939061258778,
-						52.4867132308647,
-						47.09412243544257,
-						-438.65550027475234,
-						143.43451711275117,
-						38.28822858445434,
-						27.59799888599903,
-						9999.974241771371,
-						9999.972741717036,
-						9999.974828278193,
-						9999.919454683142,
-						9999.920741770144,
-						9999.91510656977,
-						99.99999876109834,
-						99.9999986829135,
-						99.9999988161937,
-						99.9999849905193,
-						99.99998301148004,
-						99.99998059293335,
-						-820.912196674631;
-	VectorXd estimated_Qs = VectorXd::Zero(729);
+	VectorXd new_theta = VectorXd::Zero(883);
+	string theta_filename = "../../theta_100.csv";
+	
+	// cout << theta_filename << ": " << endl;
+	// cout << new_theta << endl;
+	std::filebuf fb;
+	if (fb.open (theta_filename,std::ios::in))
+	{
+		std::istream is(&fb);
+		readCSVIntoVector(new_theta, is);
+		fb.close();
+	}
+
+	VectorXd estimated_Qs = VectorXd::Zero(49);
 	double max_action_Q;
 	int max_action_index;
-	
-	// cout << "action_space " << endl << action_space << endl << endl;
-
 
 	// force sensing
 	Matrix3d R_link_sensor = Matrix3d::Identity();
@@ -459,7 +446,7 @@ int main() {
 
 			time_counter += dt;
 
-			if(time_counter > 0.5){
+			if(time_counter > 0.05){
 				// cout << "incrementing action" << endl;
 				take_action = true;
 				time_counter = 0.0;
@@ -473,11 +460,15 @@ int main() {
 				squared_current_state_vector = current_state_vector.array().square();
 				row_current_state_vector = current_state_vector.transpose();
 				row_squared_current_state_vector = squared_current_state_vector.transpose();
+				combined_state_row_vector << row_current_state_vector, row_squared_current_state_vector;
 				
 				// Compute Q values for all possible actions from current state
-				full_state_action_matrix.block(0,0,729,9) = row_current_state_vector.replicate<729,1>();
-				full_state_action_matrix.block(0,9,729,9) = row_squared_current_state_vector.replicate<729,1>();
-				estimated_Qs = full_state_action_matrix*learned_Q_coeffs;
+				for (size_t i = 0; i < 49; i++)
+				{
+					mapped_states_matrix.block(i,i*18, 1, 18) = combined_state_row_vector;
+				}
+
+				estimated_Qs = mapped_states_matrix*learned_Q_coeffs;
 				max_action_Q = estimated_Qs.maxCoeff(&max_action_index);
 
 				// apply maximum action changes to desired positions
@@ -515,8 +506,7 @@ int main() {
 					posori_task->_desired_orientation = d_rot_x * posori_task->_desired_orientation;
 				}
 				// cout << "current state: " << endl << row_current_state_vector << endl << endl;
-				// cout << "expanded state: " << endl << row_current_state_vector.replicate<729,1>() << endl << endl;
-				// cout << "state action matrix: " << endl << full_state_action_matrix << endl << endl;
+				// cout << "mapped_states_matrix: " << endl << mapped_states_matrix<< endl << endl;
 				
 				// cout << "estimated_Qs: " << endl << estimated_Qs << endl << endl;
 
@@ -534,18 +524,18 @@ int main() {
 				posori_task->computeTorques(posori_task_torques);
 			}
 			catch(exception e) {
-				cout << "control cycle: " << controller_counter << endl;
-				cout << "error in the torque computation of posori_task:" << endl;
+				std::cout << "control cycle: " << controller_counter << endl;
+				std::cout << "error in the torque computation of posori_task:" << endl;
 				cerr << e.what() << endl;
-				cout << "setting torques to zero for this control cycle" << endl;
-				cout << endl;
+				std::cout << "setting torques to zero for this control cycle" << endl;
+				std::cout << endl;
 				// posori_task_torques.setZero(); // set task torques to zero, TODO: test this
 			}
 
 			joint_task->computeTorques(joint_task_torques);
 
-			// command_torques = posori_task_torques + joint_task_torques + coriolis;	
-			command_torques.setZero();
+			command_torques = posori_task_torques + joint_task_torques + coriolis;	
+			// command_torques.setZero();
 		}
 
 		// write control
@@ -692,3 +682,19 @@ void particle_filter() {
 	std::cout << "Particle Filter Loop updates   : " << timer.elapsedCycles() << "\n";
     std::cout << "Particle Filter Loop frequency : " << timer.elapsedCycles()/end_time << "Hz\n";
 }
+
+void readCSVIntoVector(Eigen::VectorXd& storage_vector, std::istream& str){
+    std::string                line;
+    std::getline(str,line);
+
+    std::stringstream          lineStream(line);
+    std::string                cell;
+
+	int counter = 0;
+    while(std::getline(lineStream,cell, ','))
+    {
+		storage_vector[counter] = stod(cell);
+		counter++;
+    }
+}
+
