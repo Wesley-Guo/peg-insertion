@@ -1,4 +1,4 @@
-// This example tests the haptic device driver and the open-loop bilateral teleoperation controller.
+// Controller and Data Logger for executing learned discrete action policy
 
 #include "Sai2Model.h"
 #include "redis/RedisClient.h"
@@ -83,6 +83,9 @@ void readCSVIntoVector(Eigen::VectorXd& storage_vector, std::istream& str);
 const bool flag_simulation = false;
 // const bool flag_simulation = true;
 
+const bool random_policy = false;
+// const bool random_policy = true;
+
 int main() {
 
 	if(!flag_simulation) {
@@ -161,11 +164,6 @@ int main() {
 	posori_task->_use_velocity_saturation_flag = true;
 	posori_task->_linear_saturation_velocity = 0.3;
 	posori_task->_angular_saturation_velocity = M_PI/2.0;
-
-	posori_task->_desired_position << 0.499218,0.034793,0.094611;
-	posori_task->_desired_orientation << 0.999998,-0.001182,-0.001852,
-										 -0.001151,-0.999856,0.016908,
-										 -0.001872,-0.016906,-0.999855;
 
 	// use lambda smoothing instead of lambda truncation
 	posori_task->_use_lambda_truncation_flag = false;
@@ -263,19 +261,22 @@ int main() {
 	MatrixXd mapped_states_matrix = MatrixXd::Zero(49,883); 
 	mapped_states_matrix.block(0,883,49,1) = MatrixXd::Ones(49,1);
 
-	VectorXd learned_Q_coeffs = VectorXd::Zero(31);
-	VectorXd new_theta = VectorXd::Zero(883);
-	string theta_filename = "../../theta_100.csv";
+	VectorXd learned_Q_coeffs = VectorXd::Zero(883);
+	string theta_filename = "../../dense-reward-weights/theta_300_dense.csv";
+	// string theta_filename = "../../sparse-reward-weights/theta_500_sparse.csv";
+	// string theta_filename = "../../theta_300_dense.csv";
+
 	
 	// cout << theta_filename << ": " << endl;
-	// cout << new_theta << endl;
 	std::filebuf fb;
 	if (fb.open (theta_filename,std::ios::in))
 	{
 		std::istream is(&fb);
-		readCSVIntoVector(new_theta, is);
+		readCSVIntoVector(learned_Q_coeffs, is);
 		fb.close();
 	}
+
+	cout << learned_Q_coeffs << endl;
 
 	VectorXd estimated_Qs = VectorXd::Zero(49);
 	double max_action_Q;
@@ -335,10 +336,10 @@ int main() {
 	double dt = 0;
 	bool fTimerDidSleep = true;
 
-	double time_until_float = 0;
+	double time_until_start = 0.0;
 
-	// setup data logging
-	string folder = "../../02-kinesthetic-teaching/data_logging/data/";
+	// // setup data logging
+	string folder = "../../02-policy-controller/data_logging/data/";
 	string filename = "data";
     auto logger = new Logging::Logger(10000, folder + filename);
 	
@@ -346,6 +347,10 @@ int main() {
 	Vector3d log_robot_ee_pos_error = Vector3d::Zero();
 	Vector3d log_robot_ee_ori_error = Vector3d::Zero();
 	VectorXd log_sensed_force_moments = VectorXd::Zero(6);
+	
+	VectorXd log_action_taken = VectorXd::Zero(6);
+	VectorXd log_action_Q = VectorXd::Zero(1);
+	
 	VectorXd log_robot_ee_orientation = VectorXd::Zero(9);
 	Vector3d log_robot_ee_position = Vector3d::Zero();
 	Vector3d log_robot_ee_linear_velocity = Vector3d::Zero();
@@ -354,15 +359,20 @@ int main() {
 	VectorXd log_joint_velocities = robot->_dq;
 
 	logger->addVectorToLog(&log_robot_time, "robot_time");
-	logger->addVectorToLog(&log_robot_ee_pos_error, "robot_ee_pos_error");
-	logger->addVectorToLog(&log_robot_ee_ori_error, "robot_ee_ori_error");		
-	logger->addVectorToLog(&log_sensed_force_moments, "sensed_forces_moments");
-	logger->addVectorToLog(&log_robot_ee_position, "robot_ee_position");
-	logger->addVectorToLog(&log_robot_ee_orientation, "robot_ee_orientation");
-	logger->addVectorToLog(&log_robot_ee_linear_velocity, "robot_ee_linear_velocity");
-	logger->addVectorToLog(&log_robot_ee_angular_velocity, "robot_ee_angular_velocity");
-	logger->addVectorToLog(&log_joint_angles, "joint_angles");
-	logger->addVectorToLog(&log_joint_velocities, "joint_velocities");
+	// logger->addVectorToLog(&log_robot_ee_pos_error, "robot_ee_pos_error");
+	// logger->addVectorToLog(&log_robot_ee_ori_error, "robot_ee_ori_error");		
+	// logger->addVectorToLog(&log_sensed_force_moments, "sensed_forces_moments");
+	// logger->addVectorToLog(&log_action_taken, "action_from_policy");
+	// logger->addVectorToLog(&log_action_Q, "Q(s,a)_of_action");
+	// logger->addVectorToLog(&log_robot_ee_position, "robot_ee_position");
+	// logger->addVectorToLog(&log_robot_ee_orientation, "robot_ee_orientation");
+	// logger->addVectorToLog(&log_robot_ee_linear_velocity, "robot_ee_linear_velocity");
+	// logger->addVectorToLog(&log_robot_ee_angular_velocity, "robot_ee_angular_velocity");
+	// logger->addVectorToLog(&log_joint_angles, "joint_angles");
+	// logger->addVectorToLog(&log_joint_velocities, "joint_velocities");
+
+
+	bool started_logger = false;
 
 	// // start particle filter thread
 	// runloop = true;
@@ -373,6 +383,8 @@ int main() {
 	std::cout << "starting robot controller" << endl;
 	double start_time = timer.elapsedTime(); //secs
 	runloop = true;
+
+	time_until_start = 0.0;
 
 	while (runloop) {
 		// wait for next scheduled loop
@@ -422,7 +434,6 @@ int main() {
 		sensed_force_moment_world_frame.tail(3) = R_world_sensor * sensed_force_moment_local_frame.tail(3);
 
 		if(state == INIT) {
-			logger->start();
 			joint_task->updateTaskModel(MatrixXd::Identity(dof,dof));
 
 			joint_task->computeTorques(joint_task_torques);
@@ -430,19 +441,30 @@ int main() {
 
 			if((joint_task->_desired_position - joint_task->_current_position).norm() < 0.1) {
 
-				// Reinitialize controllers
-				posori_task->reInitializeTask();
-				joint_task->reInitializeTask();
+				time_until_start +=  dt;
 
-				joint_task->_kp = 50.0;
-				joint_task->_kv = 13.0;
-				joint_task->_ki = 0.0;
-				
-				state = CONTROL;
+				if (time_until_start > 1)
+				{
+					state = CONTROL;
+				}
 			}
 		}
 
 		else if(state == CONTROL) {
+
+			// Reinitialize controllers
+			joint_task->reInitializeTask();
+
+			joint_task->_kp = 50.0;
+			joint_task->_kv = 13.0;
+			joint_task->_ki = 0.0;
+			
+			if(!started_logger){
+				// Start logging 
+				logger->start();
+				std::cout << "starting robot logger" << endl;
+				started_logger = true;
+			}
 
 			time_counter += dt;
 
@@ -471,8 +493,14 @@ int main() {
 				estimated_Qs = mapped_states_matrix*learned_Q_coeffs;
 				max_action_Q = estimated_Qs.maxCoeff(&max_action_index);
 
+				// if(random_policy){
+				// 	max_action_index = rand() % 49;
+				// }	
+
 				// apply maximum action changes to desired positions
-				posori_task->_desired_position += action_space.block(max_action_index, 0, 1,3);
+				posori_task->_desired_position(0) = posori_task->_desired_position(0) + action_space(max_action_index, 0);
+				posori_task->_desired_position(1) = posori_task->_desired_position(1) + action_space(max_action_index, 1);
+				posori_task->_desired_position(2) = posori_task->_desired_position(2) + action_space(max_action_index, 2);
 
 				// apply maximum action changes to desired orientation
 				
@@ -511,9 +539,16 @@ int main() {
 				// cout << "estimated_Qs: " << endl << estimated_Qs << endl << endl;
 
 
-				cout << "max_action: " << endl << action_space.row(max_action_index)<< endl << endl;
-				cout << "pos_error_to_target: " <<  endl <<(posori_task->_current_position - target_position) << endl << endl;
+				cout << "max_action: " << endl << action_space.row(max_action_index)<< endl;
+				cout << "max_action_Q: " << endl << max_action_Q << endl << endl;
+				cout << "pos_error_to_target: " <<  endl <<(posori_task->_current_position - target_position) << endl;
+				cout << "desired position: " <<  endl <<posori_task->_desired_position << endl;
+				cout << "pos_action: " <<  endl <<action_space.block(max_action_index, 0, 1,3) << endl;
+				cout << "desired orientation: " <<  endl <<posori_task->_desired_orientation << endl;
 				cout << "delta_phi_to_target: " <<  endl << delta_phi_to_target << endl << endl ;
+
+				log_action_taken = action_space.row(max_action_index);
+				log_action_Q(0) == max_action_Q;
 
 				take_action = false;
 
@@ -568,22 +603,21 @@ int main() {
 		// }
 
 		// update logger values
-		robot->position(ee_pos, link_name, pos_in_link);
-		robot->linearVelocity(ee_linear_vel, link_name, pos_in_link);
-		robot->angularVelocity(ee_angular_vel, link_name, pos_in_link);
-		robot->rotation(ee_ori, link_name);
-		Sai2Model::orientationError(delta_phi_to_target, target_orientation, ee_ori);
+		// robot->position(ee_pos, link_name, pos_in_link);
+		// robot->linearVelocity(ee_linear_vel, link_name, pos_in_link);
+		// robot->angularVelocity(ee_angular_vel, link_name, pos_in_link);
+		// robot->rotation(ee_ori, link_name);
 
 		log_robot_time(0) = current_time;
-		log_robot_ee_pos_error = ee_pos - target_position;
-		log_robot_ee_ori_error = posori_task->_orientation_error;
-		log_sensed_force_moments = sensed_force_moment_local_frame;	
-		log_robot_ee_position = ee_pos;
-		log_robot_ee_orientation = Map<VectorXd>(ee_ori.data(), ee_ori.size());
-		log_robot_ee_linear_velocity = ee_linear_vel;
-		log_robot_ee_angular_velocity = ee_angular_vel;
-		log_joint_angles = robot->_q;
-		log_joint_velocities = robot->_dq;		
+		// log_robot_ee_pos_error = ee_pos - target_position;
+		// log_robot_ee_ori_error = delta_phi_to_target;
+		// log_sensed_force_moments = sensed_force_moment_local_frame;	
+		// log_robot_ee_position = ee_pos;
+		// log_robot_ee_orientation = Map<VectorXd>(ee_ori.data(), ee_ori.size());
+		// log_robot_ee_linear_velocity = ee_linear_vel;
+		// log_robot_ee_angular_velocity = ee_angular_vel;
+		// log_joint_angles = robot->_q;
+		// log_joint_velocities = robot->_dq;		
 		prev_time = current_time;
 		controller_counter++;
 	}
@@ -693,7 +727,8 @@ void readCSVIntoVector(Eigen::VectorXd& storage_vector, std::istream& str){
 	int counter = 0;
     while(std::getline(lineStream,cell, ','))
     {
-		storage_vector[counter] = stod(cell);
+		std::cout << "adding theta  : " << stod(cell) << " seconds\n";
+		storage_vector(counter) = stod(cell);
 		counter++;
     }
 }

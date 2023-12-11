@@ -37,7 +37,7 @@
 
 # Recorded data
 /01-kinesthetic-teaching/data_logging/data
-
+/02-policy-controller/data_logging/data
 # User files
 *.user
 
