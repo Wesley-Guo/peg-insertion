@@ -83,8 +83,8 @@ void readCSVIntoVector(Eigen::VectorXd& storage_vector, std::istream& str);
 const bool flag_simulation = false;
 // const bool flag_simulation = true;
 
-const bool random_policy = false;
-// const bool random_policy = true;
+// const bool random_policy = false;
+const bool random_policy = true;
 
 int main() {
 
@@ -262,7 +262,9 @@ int main() {
 	mapped_states_matrix.block(0,883,49,1) = MatrixXd::Ones(49,1);
 
 	VectorXd learned_Q_coeffs = VectorXd::Zero(883);
-	string theta_filename = "../../dense-reward-weights/theta_300_dense.csv";
+	// string theta_filename = "../../dense-reward-v1-weights/theta_300_dense.csv";
+	// string theta_filename = "../../dense-reward-v1-weights/theta_3600_dense.csv";
+	string theta_filename = "../../dense-reward-v2-weights/theta_450_dense.csv";
 	// string theta_filename = "../../sparse-reward-weights/theta_500_sparse.csv";
 	// string theta_filename = "../../theta_300_dense.csv";
 
@@ -343,6 +345,8 @@ int main() {
 	string filename = "data";
     auto logger = new Logging::Logger(10000, folder + filename);
 	
+	VectorXd log_test(1);
+
 	VectorXd log_robot_time(1);
 	Vector3d log_robot_ee_pos_error = Vector3d::Zero();
 	Vector3d log_robot_ee_ori_error = Vector3d::Zero();
@@ -358,18 +362,20 @@ int main() {
 	VectorXd log_joint_angles = robot->_q;
 	VectorXd log_joint_velocities = robot->_dq;
 
+	// logger->addVectorToLog(&log_test, "test");
+
 	logger->addVectorToLog(&log_robot_time, "robot_time");
-	// logger->addVectorToLog(&log_robot_ee_pos_error, "robot_ee_pos_error");
-	// logger->addVectorToLog(&log_robot_ee_ori_error, "robot_ee_ori_error");		
-	// logger->addVectorToLog(&log_sensed_force_moments, "sensed_forces_moments");
-	// logger->addVectorToLog(&log_action_taken, "action_from_policy");
-	// logger->addVectorToLog(&log_action_Q, "Q(s,a)_of_action");
-	// logger->addVectorToLog(&log_robot_ee_position, "robot_ee_position");
-	// logger->addVectorToLog(&log_robot_ee_orientation, "robot_ee_orientation");
-	// logger->addVectorToLog(&log_robot_ee_linear_velocity, "robot_ee_linear_velocity");
-	// logger->addVectorToLog(&log_robot_ee_angular_velocity, "robot_ee_angular_velocity");
-	// logger->addVectorToLog(&log_joint_angles, "joint_angles");
-	// logger->addVectorToLog(&log_joint_velocities, "joint_velocities");
+	logger->addVectorToLog(&log_robot_ee_pos_error, "robot_ee_pos_error");
+	logger->addVectorToLog(&log_robot_ee_ori_error, "robot_ee_ori_error");		
+	logger->addVectorToLog(&log_sensed_force_moments, "sensed_forces_moments");
+	logger->addVectorToLog(&log_action_taken, "action_from_policy");
+	logger->addVectorToLog(&log_action_Q, "Q(s,a)_of_action");
+	logger->addVectorToLog(&log_robot_ee_position, "robot_ee_position");
+	logger->addVectorToLog(&log_robot_ee_orientation, "robot_ee_orientation");
+	logger->addVectorToLog(&log_robot_ee_linear_velocity, "robot_ee_linear_velocity");
+	logger->addVectorToLog(&log_robot_ee_angular_velocity, "robot_ee_angular_velocity");
+	logger->addVectorToLog(&log_joint_angles, "joint_angles");
+	logger->addVectorToLog(&log_joint_velocities, "joint_velocities");
 
 
 	bool started_logger = false;
@@ -493,9 +499,9 @@ int main() {
 				estimated_Qs = mapped_states_matrix*learned_Q_coeffs;
 				max_action_Q = estimated_Qs.maxCoeff(&max_action_index);
 
-				// if(random_policy){
-				// 	max_action_index = rand() % 49;
-				// }	
+				if(random_policy){
+					max_action_index = rand() % 49;
+				}	
 
 				// apply maximum action changes to desired positions
 				posori_task->_desired_position(0) = posori_task->_desired_position(0) + action_space(max_action_index, 0);
@@ -608,16 +614,21 @@ int main() {
 		// robot->angularVelocity(ee_angular_vel, link_name, pos_in_link);
 		// robot->rotation(ee_ori, link_name);
 
+		// log_test(0) = 1.0;
+
 		log_robot_time(0) = current_time;
-		// log_robot_ee_pos_error = ee_pos - target_position;
-		// log_robot_ee_ori_error = delta_phi_to_target;
-		// log_sensed_force_moments = sensed_force_moment_local_frame;	
-		// log_robot_ee_position = ee_pos;
-		// log_robot_ee_orientation = Map<VectorXd>(ee_ori.data(), ee_ori.size());
-		// log_robot_ee_linear_velocity = ee_linear_vel;
-		// log_robot_ee_angular_velocity = ee_angular_vel;
-		// log_joint_angles = robot->_q;
-		// log_joint_velocities = robot->_dq;		
+		// std::cout << "Robot Time  : " << log_robot_time << " seconds\n";
+
+		log_robot_ee_pos_error = ee_pos - target_position;
+		log_robot_ee_ori_error = delta_phi_to_target;
+		log_sensed_force_moments = sensed_force_moment_local_frame;	
+		log_robot_ee_position = ee_pos;
+		log_robot_ee_orientation = Map<VectorXd>(ee_ori.data(), ee_ori.size());
+		log_robot_ee_linear_velocity = ee_linear_vel;
+		log_robot_ee_angular_velocity = ee_angular_vel;
+		log_joint_angles = robot->_q;
+		log_joint_velocities = robot->_dq;	
+
 		prev_time = current_time;
 		controller_counter++;
 	}
