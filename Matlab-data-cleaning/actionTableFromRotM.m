@@ -48,20 +48,33 @@ for i = 1:numOfTraj
         finalCSV(m, 1:3) = raw_data(m, 3:5); % position
         if (first == 1) && (raw_data(m, 5) < 0)
             first = 0;
-            clipping_idx = m;
+            max_rwd_idx = m;
+            clipping_idx = m+10;
         end
         finalCSV(m, 4:6) = sineTable(m, :); % sin of euler
         finalCSV(m, 7:9) = raw_data(m, 9:11); % force data
         finalCSV(m, 10:15) = actionsTable(m, :);
-        reward = sum(abs(raw_data(m, 9:11)));
-        reward = -.005*(reward)^3;
-        finalCSV(m, 16) = reward;
+        
+         % add negative reward for high force
+        f_reward = sum(abs(raw_data(m, 9:11)));
+        if f_reward > 20
+            f_reward = -.001*(f_reward)^2;
+        else
+            f_reward = 0;
+        end
+        % add positive reward for smaller pos errors
+        x_err = data(m, 1);
+        y_err = data(m, 2);
+        z_err = data(m, 3);
+        p_reward = 1/(50*sqrt(x_err^2 + y_err^2 + z_err^2));
+        
+        finalCSV(m, 16) = f_reward + p_reward;  
         finalCSV(m, 17:19) = raw_data(m+1, 3:5);
         finalCSV(m, 20:22) = sineTable(m+1, :);
         finalCSV(m, 23:25) = raw_data(m+1, 9:11);
     end
     
-    finalCSV(clipping_idx, 16) = 10000;
+    finalCSV(max_rwd_idx, 16) = 100;
     outputCSV = zeros(clipping_idx, numCol);
     outputCSV = finalCSV(1:clipping_idx, 1:numCol);
     

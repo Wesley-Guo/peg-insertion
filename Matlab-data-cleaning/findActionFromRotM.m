@@ -2,7 +2,8 @@ function [action] = findActionFromRotM(difference)
 format long;
 numActionComponents = 6;
 action = zeros(numActionComponents,1);
-posThreshold = 0.00005;
+posThreshold = 0.00001;
+posDelta = .00005;
 oriThreshold = 0.0006;
 oriDelta = .0002;
 
@@ -13,9 +14,9 @@ ori_idx = ori_idx+3;
 
 if max_pos >= posThreshold
     if difference(pos_idx) >= posThreshold
-        action(pos_idx) = posThreshold;
+        action(pos_idx) = posDelta;
     else
-        action(pos_idx) = -posThreshold;
+        action(pos_idx) = -posDelta;
     end
 end
 

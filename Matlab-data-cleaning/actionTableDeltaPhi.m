@@ -34,17 +34,30 @@ for k = 1:numOfTraj
         finalCSV(j, 1:9) = raw_data(j, 3:11);
         if (first == 1) && (raw_data(j, 5) < 0)
             first = 0;
-            clipping_idx = j;
+            max_rwd_idx = j;
+            clipping_idx = j+10;
         end
         finalCSV(j, 10:15) = actionsTable(j, :);
-        reward = sum(abs(raw_data(j, 9:11)));
-        reward = -.005*(reward)^3;
-        finalCSV(j, 16) = reward; 
+        
+        % add negative reward for high force
+        f_reward = sum(abs(raw_data(j, 9:11)));
+        if f_reward > 20
+            f_reward = -.001*(f_reward)^2;
+        else
+            f_reward = 0;
+        end
+        % add positive reward for smaller pos errors
+        x_err = data(j, 1);
+        y_err = data(j, 2);
+        z_err = data(j, 3);
+        p_reward = 1/(50*sqrt(x_err^2 + y_err^2 + z_err^2));
+        
+        finalCSV(j, 16) = f_reward + p_reward; 
         finalCSV(j, 17:numCol) = raw_data(j+1, 3:11);
     end
     
     % add high reward for z-depth and clip all remaining states
-    finalCSV(clipping_idx, 16) = 10000;
+    finalCSV(max_rwd_idx, 16) = 100;
     outputCSV = zeros(clipping_idx, numCol);
     outputCSV = finalCSV(1:clipping_idx, 1:numCol);
     
