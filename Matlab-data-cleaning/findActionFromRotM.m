@@ -8,6 +8,9 @@ oriThreshold = 0.0006;
 oriDelta = .0002;
 
 %find max pos delta
+
+%weighted_z_err = difference(1, 3)*1.3;
+%difference(1, 3) = weighted_z_err;
 [max_pos, pos_idx] = max(abs(difference(1, 1:3)));
 [max_ori, ori_idx] = max(abs(difference(1, 4:6)));
 ori_idx = ori_idx+3;

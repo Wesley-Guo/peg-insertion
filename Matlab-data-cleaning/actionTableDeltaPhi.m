@@ -42,7 +42,7 @@ for k = 1:numOfTraj
         % add negative reward for high force
         f_reward = sum(abs(raw_data(j, 9:11)));
         if f_reward > 20
-            f_reward = -.001*(f_reward)^2;
+            f_reward = -.01*(f_reward)^2;
         else
             f_reward = 0;
         end
@@ -50,7 +50,7 @@ for k = 1:numOfTraj
         x_err = data(j, 1);
         y_err = data(j, 2);
         z_err = data(j, 3);
-        p_reward = 1/(50*sqrt(x_err^2 + y_err^2 + z_err^2));
+        p_reward = 1/(50*sqrt(x_err^2 + y_err^2 + 0.1*z_err^2));
         
         finalCSV(j, 16) = f_reward + p_reward; 
         finalCSV(j, 17:numCol) = raw_data(j+1, 3:11);
